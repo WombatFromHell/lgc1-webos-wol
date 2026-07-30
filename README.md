@@ -13,6 +13,9 @@ uv run lgc1-wol.py --ip 10.0.0.5 --mac aa:bb:cc:dd:ee:ff --input hdmi2
 
 # or use env vars
 TV_IP=10.0.0.5 TV_MAC=aa:bb:cc:dd:ee:ff TV_INPUT=hdmi2 uv run lgc1-wol.py
+
+# wrapper mode: wake TV, switch input, then exec the command
+uv run lgc1-wol.py -- mpv --vo=gpu 'http://10.0.0.5:8080/stream'
 ```
 
 Edit defaults in the `# --- Configuration` block at the top of `lgc1-wol.py`, or skip the file entirely with env vars / `--flags`. Run `--help` for all options.
