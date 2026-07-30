@@ -1,0 +1,10 @@
+[project]
+name = "androidtv-wol"
+version = "1.0.0"
+description = "Self-contained Wake-On-Lan & Input-Port Switcher for LG C1 using WebOS"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = []
+
+[dependency-groups]
+dev = ["prettier>=0.0.7", "pyright>=1.1.411", "ruff>=0.16.1", "ty>=0.0.65"]
