@@ -1,2 +1,5 @@
+.venv
+.ruff_cache
+__pycache__
 .direnv
 result
