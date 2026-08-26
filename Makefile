@@ -42,7 +42,11 @@ quality: lint format
 build: clean
 	@echo "Building $(ARTIFACT) (version $(VERSION))"
 	mkdir -p $(BUILD_DIR) staging
-	cp lgc1-wol*.py install.sh LICENSE README.md staging/
+	install -m 644 lgc1-wol.py staging/lgc1-wol.py
+	install -m 644 lgc1-wold.py staging/lgc1-wold.py
+	install -m 755 install.sh staging/install.sh
+	install -m 644 LICENSE staging/LICENSE
+	install -m 644 README.md staging/README.md
 	find staging -exec touch -d "@$(EPOCH)" {} +
 	(cd staging && find . \( -type d -o -type f \) | LC_ALL=C sort | zip -X -q -@ ../$(OUT))
 	rm -rf staging
@@ -54,7 +58,9 @@ build: clean
 build-nix: clean
 	@echo "Building $(ARTIFACT) via Nix (version $(VERSION))"
 	mkdir -p $(BUILD_DIR)
-	nix build . --out-link ./$(OUT)
+	# nix build . --out-link ./$(OUT)
+	# enforce the most minimal substituters'
+	nix build . --out-link ./$(OUT) --substituters "https://cache.nixos.org"
 	cd $(BUILD_DIR) && sha256sum $(ARTIFACT) > $(ARTIFACT).sha256
 	@echo "Built: $(OUT)"
 	@echo "SHA256: $$(cat $(OUT).sha256 | cut -d' ' -f1)"
