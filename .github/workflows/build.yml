@@ -1,0 +1,36 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*" # Triggers on tags like v1.0.0
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: DeterminateSystems/nix-installer-action@v22
+
+      - run: nix develop -c make ci-nix
+
+      - uses: actions/upload-artifact@v7
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          name: build-artifacts
+          path: dist/**/*
+          retention-days: 30
+          if-no-files-found: error
+
+      - uses: softprops/action-gh-release@v3
+        if: github.event_name != 'workflow_dispatch'
+        with:
+          files: dist/**/*
+          generate_release_notes: true

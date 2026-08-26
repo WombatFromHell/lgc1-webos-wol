@@ -59,5 +59,8 @@ build-nix: clean
 	@echo "Built: $(OUT)"
 	@echo "SHA256: $$(cat $(OUT).sha256 | cut -d' ' -f1)"
 
-.PHONY: clean configure lint prettier format quality run build build-nix
+# CI entry point: reproducible nix build (used by the GitHub Actions workflow)
+ci-nix: build-nix
+
+.PHONY: clean configure lint prettier format quality run build build-nix ci-nix
 .SILENT: clean configure lint prettier format quality run build build-nix
