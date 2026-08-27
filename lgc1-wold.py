@@ -2,22 +2,24 @@
 """Session-scoped LG TV resume waker.
 
 Wrapper mode : lgc1-wold.py -- <rest-of-chain>
-    Spawns the listener (detached) and execs into the launch chain. The
-    listener dies with the chain, so it is active exactly for the session.
+    Spawns the listener (detached), blocks until the TV finishes switching
+    inputs, then execs into the launch chain. The listener dies with the
+    chain, so it is active exactly for the session.
 Poke         : lgc1-wold.py poke
-    Send "wake" to the shared unix-datagram socket (manual/testing).
+    Send "wake" to the daemon and block until the TV finishes switching.
 Listener     : lgc1-wold.py --_listen <parent-pid> <sock> <wol>  (internal)
 """
 
+import atexit
 import os
-import sys
-import time
-import socket
 import select
 import shlex
 import signal
-import atexit
+import socket
 import subprocess
+import sys
+import tempfile
+import time
 
 GRACE = 3.0  # let the NIC come back before sending WOL
 MIN_INTERVAL = 30.0  # debounce window for repeated resume signals
@@ -90,22 +92,37 @@ def daemon(parent_pid, sock, wol):
     RESUME_GAP = 5.0  # loop frozen longer than this => we resumed from suspend
     suspended = False
 
-    def do_wake():
+    def _ack(addr, status):
+        if not addr:
+            return
+        try:
+            s.sendto(status, addr)
+        except OSError as e:
+            log(f"ack send failed: {e}")
+
+    def do_wake(reply_addr=None):
         nonlocal last_start, last_loop
         now = time.time()
-        # ponytail: debounce alone suffices — do_wake blocks for GRACE, so the
-        # single thread can't re-enter within MIN_INTERVAL; no in-flight pid check.
+        # ponytail: debounce alone suffices — do_wake blocks for GRACE + the
+        # whole lgc1-wol.py run, so the single thread can't re-enter within
+        # MIN_INTERVAL; no in-flight pid check.
         if now - last_start < MIN_INTERVAL:
             log("wake skipped (debounce)")
+            _ack(reply_addr, b"skipped")
             return
         last_loop = time.monotonic()  # don't let GRACE sleep look like a freeze
         last_start = now
         time.sleep(GRACE)
+        rc = None
         try:
-            p = subprocess.Popen([wol])
-            log(f"wake fired (pid={p.pid})")
+            r = subprocess.run(
+                [wol], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False
+            )
+            rc = r.returncode
+            log(f"wake finished (rc={rc})")
         except OSError as e:
             log(f"wake failed: {e}")
+        _ack(reply_addr, b"done" if rc == 0 else b"fail")
 
     def cleanup():
         try:
@@ -170,12 +187,12 @@ def daemon(parent_pid, sock, wol):
 
         if s in r:
             try:
-                data, _ = s.recvfrom(1024)
+                data, addr = s.recvfrom(1024)
             except OSError:
                 break
             if b"wake" in data:
                 log("wake request via socket")
-                do_wake()
+                do_wake(addr if b"wait" in data else None)
         if dbus and dbus.stdout in r:
             line = dbus.stdout.readline()
             if not line:
@@ -200,9 +217,53 @@ def daemon(parent_pid, sock, wol):
     cleanup()
 
 
+def blocking_poke():
+    # ponytail: the AF_UNIX datagram client must bind a reply socket here — an
+    # unbound sender yields addr=None, so the daemon has nowhere to ack.
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    reply_sock = tempfile.mktemp(suffix=".sock", dir=_LOG_DIR)
+    s.bind(reply_sock)
+    s.settimeout(180)  # GRACE + lgc1-wol.py's 120s port poll
+    try:
+        s.sendto(b"wake\nwait", sock_path())
+    except OSError as e:
+        sys.exit(f"poke failed: {e}")
+    try:
+        data, _ = s.recvfrom(1024)
+    except TimeoutError:
+        sys.exit("poke timed out waiting for the TV to switch inputs")
+    finally:
+        try:
+            os.unlink(reply_sock)
+        except OSError:
+            pass
+    return data
+
+
+def poke():
+    status = blocking_poke()
+    if status == b"fail":
+        sys.exit("poke: TV wake/switch failed (see daemon log)")
+    # b"done" or b"skipped" (debounced, a wake already in flight) -> success
+
+
+def _wait_socket(path, timeout=10):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            os.stat(path)
+            return True
+        except OSError:
+            time.sleep(0.05)
+    return False
+
+
 def wrapper(chain):
     if not chain:
         sys.exit("wrapper mode requires a command after --")
+    # Disable the daemon's own startup poke so the wrapper drives exactly one
+    # blocking wake and waits for it to finish before exec'ing the chain.
+    env = dict(os.environ, LGC1_WOLD_POKE_ON_STARTUP="0")
     subprocess.Popen(
         [
             sys.executable,
@@ -215,16 +276,14 @@ def wrapper(chain):
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         start_new_session=True,
+        env=env,
     )
+    if not _wait_socket(sock_path()):
+        sys.exit("listener failed to start; aborting wrapped command")
+    status = blocking_poke()
+    if status == b"fail":
+        sys.exit("poke: TV wake/switch failed; aborting wrapped command")
     os.execvp(chain[0], chain)
-
-
-def poke():
-    s = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
-    try:
-        s.sendto(b"wake", sock_path())
-    except OSError as e:
-        sys.exit(f"poke failed: {e}")
 
 
 def main():

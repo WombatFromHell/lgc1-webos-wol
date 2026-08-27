@@ -51,13 +51,14 @@ Flow: `main` (246) → `wol` (19) → `wait_port` (26) → `switch_lg_input` (19
 | 110 | `cleanup()` | Unlink socket. |
 | 142 | `on_resume(how)` | On resume → `sendto(b"wake", sock)`. |
 | 148 | loop | `select` on socket + dbus; clock-gap → resume; poke → `do_wake`. |
-| 203 | `wrapper(chain)` | Detached `--_listen` spawn, then `os.execvp(chain)`. |
-| 222 | `poke()` | Manual `wake` send to socket. |
+| 203 | `wrapper(chain)` | Detached `--_listen` spawn, blocks on the poke until the switch completes, then `os.execvp(chain)` (aborts if the wake fails). |
+| 222 | `poke()` | Manual wake; blocks until switch completes (daemon acks back). |
 | 230 | `main()` | Dispatch: `poke` | `--_listen` | `--`. |
 
 Entry points:
-- `lgc1-wold.py -- <cmd>` → `wrapper` (203) → execs `<cmd>`, listener lives for
-  its lifetime (used as a Steam wrapper in `bazzified-steam.sh`).
+- `lgc1-wold.py -- <cmd>` → `wrapper` (203) → blocks until the TV switches
+  inputs, then execs `<cmd>`; listener lives for its lifetime (used as a Steam
+  wrapper in `bazzified-steam.sh`).
 - `lgc1-wold.py poke` → `poke` (222) manual/testing wake.
 - `lgc1-wold.py --_listen <pid> <sock> <wol>` → internal `daemon`.
 

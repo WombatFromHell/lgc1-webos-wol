@@ -31,10 +31,10 @@ time the machine resumes from suspend. The listener is spawned detached and dies
 with the chain.
 
 ```sh
-# wake TV for the lifetime of the command (listener exits when it does)
+# wake TV and wait for the input to switch, then run the command
 lgc1-wold.py -- steam -tenfoot
 
-# manual wake (send "wake" to the shared socket)
+# manual wake — blocks until the TV finishes switching inputs
 lgc1-wold.py poke
 ```
 
