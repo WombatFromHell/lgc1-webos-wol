@@ -24,9 +24,8 @@ run:
 	uv run lgc1-wol.py
 
 lint:
-	uv run ty check ./; \
-		uv run ruff check ./ --fix; \
-	uv run pyright
+	uv run ruff check ./
+	uv run ty check ./
 
 prettier:
 	prettier -c -w *.md
@@ -58,8 +57,6 @@ build: clean
 build-nix: clean
 	@echo "Building $(ARTIFACT) via Nix (version $(VERSION))"
 	mkdir -p $(BUILD_DIR)
-	# nix build . --out-link ./$(OUT)
-	# enforce the most minimal substituters'
 	nix build . --out-link ./$(OUT) --substituters "https://cache.nixos.org"
 	cd $(BUILD_DIR) && sha256sum $(ARTIFACT) > $(ARTIFACT).sha256
 	@echo "Built: $(OUT)"

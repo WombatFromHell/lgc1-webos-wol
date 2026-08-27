@@ -30,19 +30,9 @@ DEBUG = os.environ.get("LG_WOL_DEBUG")  # set non-empty to log raw dbus lines
 
 
 def rotate_logs(path):
-    # ponytail: rotate once per session start, keep 3 backups (.0/.1/.2); no
-    # size/time policy — add size-based rotation if logs grow unbounded
+    # ponytail: keep only the previous run's log; add size/multi-backup policy if logs grow
     try:
-        os.unlink(f"{path}.2")
-    except OSError:
-        pass
-    for i in (1, 0):
-        try:
-            os.rename(f"{path}.{i}", f"{path}.{i + 1}")
-        except OSError:
-            pass
-    try:
-        os.rename(path, f"{path}.0")
+        os.replace(path, f"{path}.0")
     except OSError:
         pass
 
@@ -74,8 +64,7 @@ def spawn_dbus():
         else [
             "dbus-monitor",
             "--system",
-            "type='signal',sender='org.freedesktop.login1',"
-            "interface='org.freedesktop.login1.Manager',member='PrepareForSleep'",
+            "type='signal',sender='org.freedesktop.login1',interface='org.freedesktop.login1.Manager',member='PrepareForSleep'",
         ]
     )
     try:
@@ -176,9 +165,8 @@ def daemon(parent_pid, sock, wol):
         # PrepareForSleep=false signal can be missed. A large loop gap means we
         # were frozen -> treat as resume regardless of dbus, and refresh the monitor.
         gap = time.monotonic() - last_loop
-        if gap > 3.0:
-            log(f"loop gap {gap:.1f}s (possible suspend/resume)")
         if gap > RESUME_GAP:
+            log(f"loop gap {gap:.1f}s (possible suspend/resume)")
             on_resume("clock-gap")
             if dbus:
                 dbus.stdout.close()
@@ -221,7 +209,9 @@ def blocking_poke():
     # ponytail: the AF_UNIX datagram client must bind a reply socket here — an
     # unbound sender yields addr=None, so the daemon has nowhere to ack.
     s = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
-    reply_sock = tempfile.mktemp(suffix=".sock", dir=_LOG_DIR)
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".sock", dir=_LOG_DIR) as tmp:
+        reply_sock = tmp.name
+    os.unlink(reply_sock)
     s.bind(reply_sock)
     s.settimeout(180)  # GRACE + lgc1-wol.py's 120s port poll
     try:
@@ -240,11 +230,14 @@ def blocking_poke():
     return data
 
 
+def _poke_or_die(tag: str):
+    if blocking_poke() == b"fail":
+        sys.exit(f"poke: TV wake/switch failed ({tag})")
+
+
 def poke():
-    status = blocking_poke()
-    if status == b"fail":
-        sys.exit("poke: TV wake/switch failed (see daemon log)")
     # b"done" or b"skipped" (debounced, a wake already in flight) -> success
+    _poke_or_die("see daemon log")
 
 
 def _wait_socket(path, timeout=10):
@@ -280,9 +273,7 @@ def wrapper(chain):
     )
     if not _wait_socket(sock_path()):
         sys.exit("listener failed to start; aborting wrapped command")
-    status = blocking_poke()
-    if status == b"fail":
-        sys.exit("poke: TV wake/switch failed; aborting wrapped command")
+    _poke_or_die("aborting wrapped command")
     os.execvp(chain[0], chain)
 
 
